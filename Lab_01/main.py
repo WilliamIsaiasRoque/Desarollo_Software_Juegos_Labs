@@ -23,7 +23,7 @@ backgrounds = [
     pygame.image.load('lvl3.jpg'),
 ]
 LEVEL_THRESHOLDS = [0, 5, 10]  # puntaje mínimo para entrar a cada nivel
-LEVEL_SPEED_MULTIPLIERS = [1.0, 2.0, 2.5]  # velocidad de enemigos por nivel
+LEVEL_SPEED_MULTIPLIERS = [1.0, 1.6, 2.2]  # velocidad de enemigos por nivel
 
 # Sonido
 mixer.music.load("background.wav")
@@ -34,8 +34,15 @@ pygame.display.set_caption("Space Invader")
 icon = pygame.image.load('ufo.png')
 pygame.display.set_icon(icon)
 
+# Tamaños de renderizado fijos: los archivos de imagen pueden venir en
+# cualquier resolución (512x512, 840x1127, etc.), pero en el juego siempre
+# se dibujan a este tamaño, sin importar el tamaño real del archivo
+PLAYER_SIZE = (64, 64)
+ENEMY_SIZE = (64, 64)
+BULLET_SIZE = (32, 32)
+
 # Jugador
-playerImg = pygame.image.load('player.png')
+playerImg = pygame.transform.scale(pygame.image.load('player.png'), PLAYER_SIZE)
 PLAYER_X_MAX = SCREEN_WIDTH - playerImg.get_width()  # antes fijo en 736 (ancho de pantalla viejo - sprite); no llegaba al borde derecho al cambiar el tamaño de la ventana
 playerX = PLAYER_X_MAX // 2
 playerY = SCREEN_HEIGHT - 230  # antes -200: un poco más arriba
@@ -54,18 +61,22 @@ down_pressed = False
 space_pressed = False
 
 # Enemigo
-enemyImg = []
+# Imágenes por nivel (el índice es el mismo current_level usado para el fondo)
+enemyImages = [
+    pygame.transform.scale(pygame.image.load('enemy1.png'), ENEMY_SIZE),
+    pygame.transform.scale(pygame.image.load('enemy2.png'), ENEMY_SIZE),
+    pygame.transform.scale(pygame.image.load('enemy3.png'), ENEMY_SIZE),
+]
 enemyX = []
 enemyY = []
 enemyX_change = []
 enemyY_change = []
 num_of_enemies = 6
 ENEMY_SPEED = 3  # antes 1: quedaba muy lento tras limitar los FPS a 60
-ENEMY_X_MAX = SCREEN_WIDTH - 64  # mismo tamaño de sprite (64x64) que player/enemy
+ENEMY_X_MAX = SCREEN_WIDTH - ENEMY_SIZE[0]
 GAME_OVER_LINE = playerY - 140  # si un enemigo cruza esta línea, termina el juego
 
 for i in range(num_of_enemies):
-    enemyImg.append(pygame.image.load('enemy.png'))
     enemyX.append(random.randint(0, ENEMY_X_MAX))
     enemyY.append(random.randint(0, 150))
     enemyX_change.append(1)  # dirección: 1 = derecha, -1 = izquierda (la velocidad se aplica aparte, ver LEVEL_SPEED_MULTIPLIERS)
@@ -76,13 +87,20 @@ for i in range(num_of_enemies):
 # Ready - La bala no es visible en pantalla
 # Fire - La bala está actualmente en movimiento
 
-bulletImg = pygame.image.load('bullet.png')
+bulletImg = pygame.transform.scale(pygame.image.load('bullet.png'), BULLET_SIZE)
 BULLET_RESET_Y = playerY - 100  # posición de "lista para disparar", relativa a la nave (antes fija en 480)
 bulletX = 0
 bulletY = BULLET_RESET_Y
 bulletX_change = 0
 bulletY_change = 18  # antes 10: quedaba muy lenta tras limitar los FPS a 60
 bullet_state = "ready"
+
+# Bala enemiga: imagen propia, igual para los 3 niveles
+enemyBulletImg = pygame.transform.scale(pygame.image.load('bulletenemy.png'), BULLET_SIZE)
+enemyBulletX = 0
+enemyBulletY = 0
+ENEMY_BULLET_SPEED = 8
+enemy_bullet_state = "ready"
 
 # Puntaje
 
@@ -104,17 +122,21 @@ def show_score(x, y):
 
 def game_over_text():
     over_text = over_font.render("GAME OVER", True, (255, 255, 255))
-    screen.blit(over_text, (200, 250))
+    over_rect = over_text.get_rect(center=(SCREEN_WIDTH // 2, 280))
+    screen.blit(over_text, over_rect)
+
     restart_text = font.render("Press R to restart", True, (255, 255, 255))
-    screen.blit(restart_text, (350, 330))
+    restart_rect = restart_text.get_rect(center=(SCREEN_WIDTH // 2, 350))
+    screen.blit(restart_text, restart_rect)
 
 
 def reset_game():
-    global playerX, playerY, bulletY, bullet_state, score_value, game_over
+    global playerX, playerY, bulletY, bullet_state, enemy_bullet_state, score_value, game_over
     playerX = PLAYER_X_MAX // 2
     playerY = PLAYER_Y_MIN
     bulletY = BULLET_RESET_Y
     bullet_state = "ready"
+    enemy_bullet_state = "ready"
     score_value = 0
     game_over = False
     for i in range(num_of_enemies):
@@ -127,14 +149,20 @@ def player(x, y):
     screen.blit(playerImg, (x, y))
 
 
-def enemy(x, y, i):
-    screen.blit(enemyImg[i], (x, y))
+def enemy(x, y):
+    screen.blit(enemyImages[current_level], (x, y))
 
 
 def fire_bullet(x, y):
     global bullet_state
     bullet_state = "fire"
     screen.blit(bulletImg, (x + 16, y + 10))
+
+
+def fire_enemy_bullet(x, y):
+    global enemy_bullet_state
+    enemy_bullet_state = "fire"
+    screen.blit(enemyBulletImg, (x + 16, y + 10))
 
 
 def isCollision(enemyX, enemyY, bulletX, bulletY):
@@ -248,7 +276,7 @@ while running:
                 enemyX[i] = random.randint(0, ENEMY_X_MAX)
                 enemyY[i] = random.randint(50, 150)
 
-            enemy(enemyX[i], enemyY[i], i)
+            enemy(enemyX[i], enemyY[i])
 
         # Movimiento de la bala
         if bulletY <= 0:
@@ -258,6 +286,29 @@ while running:
         if bullet_state == "fire":
             fire_bullet(bulletX, bulletY)
             bulletY -= bulletY_change
+
+        # Disparo de los enemigos: dispara uno al azar; cuando su bala termina
+        # el recorrido, vuelve a "ready" y se elige otro enemigo al azar
+        if enemy_bullet_state == "ready":
+            shooting_enemy = random.randint(0, num_of_enemies - 1)
+            enemyBulletX = enemyX[shooting_enemy]
+            enemyBulletY = enemyY[shooting_enemy]
+            fire_enemy_bullet(enemyBulletX, enemyBulletY)
+
+        if enemyBulletY >= SCREEN_HEIGHT:
+            enemy_bullet_state = "ready"
+
+        if enemy_bullet_state == "fire":
+            fire_enemy_bullet(enemyBulletX, enemyBulletY)
+            effective_enemy_bullet_speed = ENEMY_BULLET_SPEED * LEVEL_SPEED_MULTIPLIERS[current_level]
+            enemyBulletY += int(effective_enemy_bullet_speed)
+
+            # Colisión de la bala enemiga contra el jugador
+            hit_player = isCollision(playerX, playerY, enemyBulletX, enemyBulletY)
+            if hit_player:
+                explosionSound = mixer.Sound("explosion.wav")
+                explosionSound.play()
+                game_over = True
     else:
         game_over_text()
 
