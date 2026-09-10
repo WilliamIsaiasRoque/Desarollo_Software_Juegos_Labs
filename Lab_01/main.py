@@ -8,14 +8,22 @@ from pygame import mixer
 pygame.init()
 
 # Crear la pantalla
-screen = pygame.display.set_mode((1000, 800))
+SCREEN_WIDTH = 1000
+SCREEN_HEIGHT = 800
+screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 
 # Reloj (fija la velocidad del juego a los FPS en vez de depender del hardware)
 clock = pygame.time.Clock()
 FPS = 60
 
-# Fondo
-background = pygame.image.load('background.jpg')
+# Fondos por nivel (el índice se elige según el puntaje, ver LEVEL_THRESHOLDS)
+backgrounds = [
+    pygame.image.load('lvl1.jpg'),
+    pygame.image.load('lvl2.jpg'),
+    pygame.image.load('lvl3.jpg'),
+]
+LEVEL_THRESHOLDS = [0, 5, 10]  # puntaje mínimo para entrar a cada nivel
+LEVEL_SPEED_MULTIPLIERS = [1.0, 2.0, 2.5]  # velocidad de enemigos por nivel
 
 # Sonido
 mixer.music.load("background.wav")
@@ -28,15 +36,21 @@ pygame.display.set_icon(icon)
 
 # Jugador
 playerImg = pygame.image.load('player.png')
-playerX = 370
-playerY = 580
+PLAYER_X_MAX = SCREEN_WIDTH - playerImg.get_width()  # antes fijo en 736 (ancho de pantalla viejo - sprite); no llegaba al borde derecho al cambiar el tamaño de la ventana
+playerX = PLAYER_X_MAX // 2
+playerY = SCREEN_HEIGHT - 230  # antes -200: un poco más arriba
+PLAYER_Y_MIN = playerY  # no puede subir más de su altura actual
+PLAYER_Y_MAX = playerY + 100  # "barrera invisible" hasta donde puede bajar
 playerX_change = 0
+playerY_change = 0
 PLAYER_SPEED = 6  # píxeles por frame a 60 FPS (ajustado tras agregar clock.tick)
 
 # Estado independiente por tecla (arregla el bug donde soltar una tecla de
 # dirección cancelaba el movimiento aunque la tecla opuesta siguiera presionada)
 left_pressed = False
 right_pressed = False
+up_pressed = False
+down_pressed = False
 space_pressed = False
 
 # Enemigo
@@ -47,12 +61,14 @@ enemyX_change = []
 enemyY_change = []
 num_of_enemies = 6
 ENEMY_SPEED = 3  # antes 1: quedaba muy lento tras limitar los FPS a 60
+ENEMY_X_MAX = SCREEN_WIDTH - 64  # mismo tamaño de sprite (64x64) que player/enemy
+GAME_OVER_LINE = playerY - 140  # si un enemigo cruza esta línea, termina el juego
 
 for i in range(num_of_enemies):
     enemyImg.append(pygame.image.load('enemy.png'))
-    enemyX.append(random.randint(0, 736))
+    enemyX.append(random.randint(0, ENEMY_X_MAX))
     enemyY.append(random.randint(0, 150))
-    enemyX_change.append(ENEMY_SPEED)
+    enemyX_change.append(1)  # dirección: 1 = derecha, -1 = izquierda (la velocidad se aplica aparte, ver LEVEL_SPEED_MULTIPLIERS)
     enemyY_change.append(40)
 
 # Bala
@@ -61,8 +77,9 @@ for i in range(num_of_enemies):
 # Fire - La bala está actualmente en movimiento
 
 bulletImg = pygame.image.load('bullet.png')
+BULLET_RESET_Y = playerY - 100  # posición de "lista para disparar", relativa a la nave (antes fija en 480)
 bulletX = 0
-bulletY = 480
+bulletY = BULLET_RESET_Y
 bulletX_change = 0
 bulletY_change = 18  # antes 10: quedaba muy lenta tras limitar los FPS a 60
 bullet_state = "ready"
@@ -93,16 +110,17 @@ def game_over_text():
 
 
 def reset_game():
-    global playerX, bulletY, bullet_state, score_value, game_over
-    playerX = 370
-    bulletY = 480
+    global playerX, playerY, bulletY, bullet_state, score_value, game_over
+    playerX = PLAYER_X_MAX // 2
+    playerY = PLAYER_Y_MIN
+    bulletY = BULLET_RESET_Y
     bullet_state = "ready"
     score_value = 0
     game_over = False
     for i in range(num_of_enemies):
-        enemyX[i] = random.randint(0, 736)
+        enemyX[i] = random.randint(0, ENEMY_X_MAX)
         enemyY[i] = random.randint(0, 150)
-        enemyX_change[i] = ENEMY_SPEED
+        enemyX_change[i] = 1
 
 
 def player(x, y):
@@ -131,10 +149,18 @@ def isCollision(enemyX, enemyY, bulletX, bulletY):
 running = True
 while running:
 
+    # Nivel actual según el puntaje: recorre los umbrales de mayor a menor
+    # y se queda con el primero que el puntaje ya alcanzó
+    current_level = 0
+    for level_index in range(len(LEVEL_THRESHOLDS) - 1, -1, -1):
+        if score_value >= LEVEL_THRESHOLDS[level_index]:
+            current_level = level_index
+            break
+
     # RGB = Rojo, Verde, Azul
     screen.fill((0, 0, 0))
-    # Imagen de fondo
-    screen.blit(background, (0, 0))
+    # Imagen de fondo (según el nivel actual)
+    screen.blit(backgrounds[current_level], (0, 0))
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
@@ -145,6 +171,10 @@ while running:
                 left_pressed = True
             if event.key == pygame.K_RIGHT or event.key == pygame.K_d:
                 right_pressed = True
+            if event.key == pygame.K_UP or event.key == pygame.K_w:
+                up_pressed = True
+            if event.key == pygame.K_DOWN or event.key == pygame.K_s:
+                down_pressed = True
             if event.key == pygame.K_SPACE:
                 space_pressed = True
             if event.key == pygame.K_r and game_over:
@@ -155,6 +185,10 @@ while running:
                 left_pressed = False
             if event.key == pygame.K_RIGHT or event.key == pygame.K_d:
                 right_pressed = False
+            if event.key == pygame.K_UP or event.key == pygame.K_w:
+                up_pressed = False
+            if event.key == pygame.K_DOWN or event.key == pygame.K_s:
+                down_pressed = False
             if event.key == pygame.K_SPACE:
                 space_pressed = False
 
@@ -169,29 +203,38 @@ while running:
             bulletSound = mixer.Sound("laser.wav")
             bulletSound.play()
             bulletX = playerX
+            bulletY = playerY - 40  # nace justo encima de la nave, sigue su altura actual
             fire_bullet(bulletX, bulletY)
 
         playerX_change = (int(right_pressed) - int(left_pressed)) * PLAYER_SPEED
         playerX += playerX_change
         if playerX <= 0:
             playerX = 0
-        elif playerX >= 736:
-            playerX = 736
+        elif playerX >= PLAYER_X_MAX:
+            playerX = PLAYER_X_MAX
+
+        playerY_change = (int(down_pressed) - int(up_pressed)) * PLAYER_SPEED
+        playerY += playerY_change
+        if playerY <= PLAYER_Y_MIN:
+            playerY = PLAYER_Y_MIN
+        elif playerY >= PLAYER_Y_MAX:
+            playerY = PLAYER_Y_MAX
 
         # Movimiento de los enemigos
         for i in range(num_of_enemies):
 
             # Game Over: detener el juego en vez de solo ocultar los enemigos
-            if enemyY[i] > 440:
+            if enemyY[i] > GAME_OVER_LINE:
                 game_over = True
                 break
 
-            enemyX[i] += enemyX_change[i]
+            effective_enemy_speed = ENEMY_SPEED * LEVEL_SPEED_MULTIPLIERS[current_level]
+            enemyX[i] += int(enemyX_change[i] * effective_enemy_speed)
             if enemyX[i] <= 0:
-                enemyX_change[i] = ENEMY_SPEED
+                enemyX_change[i] = 1
                 enemyY[i] += enemyY_change[i]
-            elif enemyX[i] >= 736:
-                enemyX_change[i] = -ENEMY_SPEED
+            elif enemyX[i] >= ENEMY_X_MAX:
+                enemyX_change[i] = -1
                 enemyY[i] += enemyY_change[i]
 
             # Colisión
@@ -199,17 +242,17 @@ while running:
             if collision:
                 explosionSound = mixer.Sound("explosion.wav")
                 explosionSound.play()
-                bulletY = 480
+                bulletY = BULLET_RESET_Y
                 bullet_state = "ready"
                 score_value += 1
-                enemyX[i] = random.randint(0, 736)
+                enemyX[i] = random.randint(0, ENEMY_X_MAX)
                 enemyY[i] = random.randint(50, 150)
 
             enemy(enemyX[i], enemyY[i], i)
 
         # Movimiento de la bala
         if bulletY <= 0:
-            bulletY = 480
+            bulletY = BULLET_RESET_Y
             bullet_state = "ready"
 
         if bullet_state == "fire":
