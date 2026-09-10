@@ -114,6 +114,11 @@ testY = 10
 over_font = pygame.font.Font('freesansbold.ttf', 64)
 game_over = False
 
+# Menú inicial y pausa
+menu_font = pygame.font.Font('freesansbold.ttf', 64)
+game_started = False
+paused = False
+
 
 def show_score(x, y):
     score = font.render("Score : " + str(score_value), True, (255, 255, 255))
@@ -130,8 +135,32 @@ def game_over_text():
     screen.blit(restart_text, restart_rect)
 
 
+def start_menu():
+    title_text = menu_font.render("SPACE INVADER", True, (255, 255, 255))
+    title_rect = title_text.get_rect(center=(SCREEN_WIDTH // 2, 280))
+    screen.blit(title_text, title_rect)
+
+    start_text = font.render("Presiona ESPACIO para comenzar", True, (255, 255, 255))
+    start_rect = start_text.get_rect(center=(SCREEN_WIDTH // 2, 360))
+    screen.blit(start_text, start_rect)
+
+    pause_hint_text = font.render("Presiona P para pausar el juego", True, (255, 255, 255))
+    pause_hint_rect = pause_hint_text.get_rect(center=(SCREEN_WIDTH // 2, 400))
+    screen.blit(pause_hint_text, pause_hint_rect)
+
+
+def pause_text():
+    paused_text = over_font.render("PAUSA", True, (255, 255, 255))
+    paused_rect = paused_text.get_rect(center=(SCREEN_WIDTH // 2, 280))
+    screen.blit(paused_text, paused_rect)
+
+    resume_text = font.render("Presiona P para continuar", True, (255, 255, 255))
+    resume_rect = resume_text.get_rect(center=(SCREEN_WIDTH // 2, 350))
+    screen.blit(resume_text, resume_rect)
+
+
 def reset_game():
-    global playerX, playerY, bulletY, bullet_state, enemy_bullet_state, score_value, game_over
+    global playerX, playerY, bulletY, bullet_state, enemy_bullet_state, score_value, game_over, paused
     playerX = PLAYER_X_MAX // 2
     playerY = PLAYER_Y_MIN
     bulletY = BULLET_RESET_Y
@@ -139,6 +168,7 @@ def reset_game():
     enemy_bullet_state = "ready"
     score_value = 0
     game_over = False
+    paused = False
     for i in range(num_of_enemies):
         enemyX[i] = random.randint(0, ENEMY_X_MAX)
         enemyY[i] = random.randint(0, 150)
@@ -205,8 +235,12 @@ while running:
                 down_pressed = True
             if event.key == pygame.K_SPACE:
                 space_pressed = True
+                if not game_started:
+                    game_started = True
             if event.key == pygame.K_r and game_over:
                 reset_game()
+            if event.key == pygame.K_p and game_started and not game_over:
+                paused = not paused
 
         if event.type == pygame.KEYUP:
             if event.key == pygame.K_LEFT or event.key == pygame.K_a:
@@ -223,7 +257,13 @@ while running:
     # 5 = 5 + -0.1 -> 5 = 5 - 0.1
     # 5 = 5 + 0.1
 
-    if not game_over:
+    if not game_started:
+        start_menu()
+    elif game_over:
+        game_over_text()
+    elif paused:
+        pause_text()
+    else:
         # Disparar automáticamente cada frame mientras se mantiene la barra
         # espaciadora presionada, tan pronto la bala anterior vuelve a estar
         # lista (en vez de necesitar una nueva pulsación de tecla)
@@ -309,8 +349,6 @@ while running:
                 explosionSound = mixer.Sound("explosion.wav")
                 explosionSound.play()
                 game_over = True
-    else:
-        game_over_text()
 
     player(playerX, playerY)
     show_score(textX, testY)
